@@ -4,7 +4,9 @@ import { getVertexClient } from './vertex';
  * Development mode: Returns mock code when USE_MOCK_AI is set to 'true'
  */
 function getMockCode(prompt: string): string {
-  return `// Mock AI-generated code fix
+  return `File: lib/fix.ts
+
+// Mock AI-generated code fix
 // This is a placeholder response when using development mode
 
 function fixIssue() {

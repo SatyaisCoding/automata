@@ -3,6 +3,7 @@ import { JiraTicket } from '@/types/ticket';
 import { buildPrompt } from '@/lib/prompt';
 import { generateCode } from '@/lib/ai';
 import { getCodeContext } from '@/lib/context';
+import { createPRFromAICode } from '@/lib/github';
 
 /**
  * Raw Jira webhook payload structure
@@ -126,9 +127,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate code using AI
+    let generatedCode: string;
     try {
       const prompt = buildPrompt(ticket, codeContext);
-      const generatedCode = await generateCode(prompt);
+      generatedCode = await generateCode(prompt);
       
       console.log('=== AI Generated Code ===');
       console.log(generatedCode);
@@ -144,8 +146,38 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Create Pull Request from AI-generated code
+    let prUrl: string | undefined;
+    let prNumber: number | undefined;
+    let prError: string | undefined;
+    try {
+      console.log('=== Creating Pull Request ===');
+      console.log('AI Generated Code Length:', generatedCode.length);
+      const prResult = await createPRFromAICode(ticket, generatedCode);
+      prUrl = prResult.prUrl;
+      prNumber = prResult.prNumber;
+      console.log(`✅ Pull Request created: ${prUrl}`);
+      console.log(`PR Number: #${prNumber}`);
+      console.log('============================');
+    } catch (error) {
+      console.error('❌ Error creating Pull Request:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      console.error('Error message:', errorMessage);
+      if (errorStack) {
+        console.error('Error stack:', errorStack);
+      }
+      prError = errorMessage;
+      // Log but don't fail the request - AI generation succeeded
+    }
+
     // Return success response
-    return NextResponse.json({ status: 'ai_generated' });
+    return NextResponse.json({
+      status: 'ai_generated',
+      pr_url: prUrl,
+      pr_number: prNumber,
+      pr_error: prError,
+    });
   } catch (error) {
     console.error('Unexpected error processing webhook:', error);
     return NextResponse.json(
