@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { JiraTicket } from '@/types/ticket';
 import { buildPrompt } from '@/lib/prompt';
 import { generateCode } from '@/lib/ai';
-import { getCodeContext } from '@/lib/context';
+import { getCodeContext, CodeContext } from '@/lib/context';
 import { createPRFromAICode } from '@/lib/github';
 import {
   logJiraTicketReceived,
@@ -146,7 +146,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Fetch code context from repository
-    let codeContext;
+    let codeContext: CodeContext[] = [];
     try {
       console.log('Fetching code context from repository...');
       codeContext = await getCodeContext(ticket);
