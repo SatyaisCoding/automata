@@ -72,7 +72,9 @@ public class CodeContextService {
     }
 
     private boolean hasRelevantExtension(String path) {
-        return path.endsWith(".ts") || path.endsWith(".tsx") || path.endsWith(".js") || path.endsWith(".jsx");
+        return path.endsWith(".ts") || path.endsWith(".tsx") || path.endsWith(".js") || path.endsWith(".jsx")
+                || path.endsWith(".java") || path.endsWith(".py") || path.endsWith(".go")
+                || path.endsWith(".properties") || path.endsWith(".xml") || path.endsWith(".yml") || path.endsWith(".yaml");
     }
 
     private int scoreFile(String path, List<String> keywords) {

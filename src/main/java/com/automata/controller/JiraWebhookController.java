@@ -12,6 +12,7 @@ import java.util.Map;
 
 @Slf4j
 @RestController
+@CrossOrigin(origins = "*")
 @RequestMapping("/api/webhook/jira")
 public class JiraWebhookController {
 

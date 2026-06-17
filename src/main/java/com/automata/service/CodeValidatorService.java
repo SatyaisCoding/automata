@@ -23,7 +23,7 @@ public class CodeValidatorService {
         }
 
         List<FileChange> codeFiles = fileChanges.stream()
-                .filter(fc -> fc.getPath().matches(".*\\.(ts|tsx|js|jsx)$"))
+                .filter(fc -> fc.getPath().matches(".*\\.(ts|tsx|js|jsx|java|py|go)$"))
                 .collect(Collectors.toList());
 
         if (codeFiles.isEmpty()) {
