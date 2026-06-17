@@ -171,13 +171,18 @@ public class GitHubService {
         List<String> currentContent = new ArrayList<>();
 
         for (String line : lines) {
+            String trimmed = line.trim();
             String newPath = null;
-            if (line.toLowerCase().startsWith("file:")) {
-                newPath = line.substring(5).trim();
-            } else if (line.startsWith("```")) {
-                // Parse code block start
-                // Match pattern: ```(lang):?(path)
-                String remainder = line.substring(3).trim();
+
+            // 1. Detect path from file: or path: prefix
+            if (trimmed.toLowerCase().startsWith("file:")) {
+                newPath = trimmed.substring(5).trim();
+            } else if (trimmed.toLowerCase().startsWith("path:")) {
+                newPath = trimmed.substring(5).trim();
+            }
+            // 2. Detect path from code block backticks ```lang:path
+            else if (trimmed.startsWith("```")) {
+                String remainder = trimmed.substring(3).trim();
                 if (!remainder.isEmpty()) {
                     int colonIndex = remainder.indexOf(':');
                     if (colonIndex != -1) {
@@ -187,8 +192,18 @@ public class GitHubService {
                     }
                 }
             }
+            // 3. Detect path from code comments (e.g. // UserMapper.java) at the start of a block
+            else if ((trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("/*")) && currentContent.isEmpty()) {
+                String potentialPath = trimmed.replace("//", "").replace("#", "").replace("/*", "").replace("*/", "").trim();
+                if (potentialPath.matches("[a-zA-Z0-9_\\-\\./]+\\.[a-zA-Z0-9]+")) {
+                    newPath = potentialPath;
+                }
+            }
 
             if (newPath != null) {
+                // Clean leading slashes/dots
+                newPath = newPath.replaceAll("^\\.+/", "").replaceAll("^/+", "").trim();
+                
                 if (currentPath != null && !currentContent.isEmpty()) {
                     changes.add(FileChange.builder()
                             .path(currentPath)
@@ -200,20 +215,17 @@ public class GitHubService {
                 continue;
             }
 
-            if (line.trim().equals("```") || line.trim().startsWith("```")) {
+            // Ignore markdown backtick lines completely
+            if (trimmed.startsWith("```")) {
                 continue;
             }
 
             if (currentPath != null) {
                 currentContent.add(line);
             } else {
-                if (line.contains("import") || line.contains("export") || line.contains("function")) {
-                    if (changes.isEmpty() && currentContent.isEmpty()) {
-                        currentPath = "lib/fix.ts";
-                    }
-                    if (currentPath != null) {
-                        currentContent.add(line);
-                    }
+                if (trimmed.contains("class ") || trimmed.contains("function ") || trimmed.contains("import ") || trimmed.contains("public ")) {
+                    currentPath = "lib/fix.ts"; // default fallback path if none inferred
+                    currentContent.add(line);
                 }
             }
         }
@@ -240,7 +252,7 @@ public class GitHubService {
                     if (path.contains("..") || path.startsWith("/")) {
                         return false;
                     }
-                    return path.matches(".*\\.(ts|tsx|js|jsx|json|md)$");
+                    return path.matches(".*\\.(ts|tsx|js|jsx|json|md|java|py|go|css|html|properties|xml|yml|yaml)$");
                 })
                 .collect(Collectors.toList());
     }

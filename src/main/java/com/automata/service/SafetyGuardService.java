@@ -35,7 +35,7 @@ public class SafetyGuardService {
         if (path.contains("..") || path.startsWith("/")) {
             return true;
         }
-        return !path.matches(".*\\.(ts|tsx|js|jsx|json|md|css|scss|html)$");
+        return !path.matches(".*\\.(ts|tsx|js|jsx|json|md|java|py|go|css|html|properties|xml|yml|yaml)$");
     }
 
     public GuardResult validateFileChanges(List<FileChange> fileChanges) {
