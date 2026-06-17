@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
+import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Automata',
-  description: 'Automata - Jira Webhook Handler',
+  title: 'Automata X - Agent Control Center',
+  description: 'Autonomous Incident-to-PR Engineering Agent',
 };
 
 export default function RootLayout({
