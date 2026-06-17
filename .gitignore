@@ -39,3 +39,17 @@ service-account-key.json
 *.tsbuildinfo
 next-env.d.ts
 
+# Java & Maven
+target/
+*.class
+*.jar
+*.war
+*.ear
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+*.log
+
+
