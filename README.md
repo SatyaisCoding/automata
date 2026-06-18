@@ -449,6 +449,8 @@ http://localhost:3001
 | `GITHUB_OWNER` | Yes | — | GitHub user/org that owns the target repository |
 | `GITHUB_REPO` | Yes | — | Repository name where branches/PRs are created |
 | `GITHUB_DEFAULT_BRANCH` | No | `main` | Base branch for new feature branches |
+| `GITHUB_WEBHOOK_SECRET` | No | — | HMAC-SHA256 secret key to verify incoming GitHub webhook signatures |
+| `JIRA_WEBHOOK_SECRET` | No | — | Shared secret token query parameter to verify incoming Jira webhook triggers |
 
 ---
 
@@ -456,10 +458,11 @@ http://localhost:3001
 
 ### POST `/api/webhook/jira`
 
-The primary endpoint that receives incident tickets and triggers the multi-agent pipeline.
+The primary endpoint that receives incident tickets and triggers the multi-agent pipeline. Can be protected using the `secret` query parameter.
 
 **Port:** `9095`  
-**Content-Type:** `application/json`
+**Content-Type:** `application/json`  
+**Query Param:** `secret` (optional, shared secret token)  
 
 #### Request Body
 
@@ -478,19 +481,41 @@ The primary endpoint that receives incident tickets and triggers the multi-agent
 }
 ```
 
-#### Response Body (Streaming JSON)
+### POST `/api/webhook/github`
+
+Alternative endpoint that receives GitHub issue webhook events and maps them to the multi-agent pipeline. Verifies integrity using signature headers.
+
+**Port:** `9095`  
+**Content-Type:** `application/json`  
+**Required Header:** `X-Hub-Signature-256` (HMAC-SHA256 signature when secret is configured)  
+
+#### Request Body (GitHub Issues webhook event payload)
+
+```json
+{
+  "action": "opened",
+  "issue": {
+    "id": 1234567,
+    "number": 42,
+    "title": "NullPointerException in PaymentService",
+    "body": "Method dereferences user object without checking for null. Error logs: ..."
+  }
+}
+```
+
+#### Response Body (Unified Response for both Webhooks)
 
 The response is a rich JSON object with the full execution telemetry:
 
 ```json
 {
-  "ticketKey": "BUG-405",
-  "summary": "ArrayIndexOutOfBoundsException in UserMapper",
+  "ticketKey": "GH-42",
+  "summary": "NullPointerException in PaymentService",
   "status": "success",
   "investigationReport": "...",
   "planningStrategy": "...",
   "proposedFix": {
-    "UserMapper.java": "public class UserMapper { ... }"
+    "PaymentService.java": "public class PaymentService { ... }"
   },
   "validationResult": "PASSED",
   "reviewScore": 8.5,
