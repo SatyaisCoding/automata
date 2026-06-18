@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.automata.model.AgentReports.RcaReport;
 import com.automata.model.FileChange;
 import com.automata.model.JiraTicket;
+import com.automata.service.LogStreamService;
 import com.automata.service.ai.FallbackAiService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,8 +24,11 @@ public class RcaAgent {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private LogStreamService logStreamService;
+
     public RcaReport generateRca(JiraTicket ticket, List<FileChange> fileChanges, String preferredModel) {
-        log.info("[INFO] RCA Agent generating post-mortem engineering report...");
+        logStreamService.broadcast("[INFO] RCA Agent generating post-mortem engineering report...");
 
         String filesStr = fileChanges != null ? fileChanges.stream()
                 .map(FileChange::getPath)

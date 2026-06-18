@@ -38,6 +38,9 @@ public class JiraWebhookService {
     @Autowired
     private AuditLogService auditLogService;
 
+    @Autowired
+    private LogStreamService logStreamService;
+
     // Agent Autowirings
     @Autowired
     private AnalysisAgent analysisAgent;
@@ -51,19 +54,19 @@ public class JiraWebhookService {
     @Autowired
     private LocalMemoryService localMemoryService;
 
-    public Map<String, Object> processWebhook(JiraTicket ticket, String preferredModel) {
+    public Map<String, Object> processWebhook(JiraTicket ticket, String preferredModel, String source) {
         Map<String, Object> result = new HashMap<>();
 
         try {
-            // 1. Audit Log: Jira ticket received
-            log.info("[INFO] === Jira Webhook Received ===");
-            log.info("[INFO] Issue Key: {}", ticket.getKey());
-            log.info("[INFO] Summary: {}", ticket.getSummary());
-            log.info("[INFO] Description: {}", ticket.getDescription());
-            log.info("[INFO] Priority: {}", ticket.getPriority() != null ? ticket.getPriority() : "Not set");
-            log.info("[INFO] ============================");
+            // 1. Audit Log: Ticket received
+            logStreamService.broadcast("[INFO] === " + source + " Webhook Received ===");
+            logStreamService.broadcast("[INFO] Issue Key: " + ticket.getKey());
+            logStreamService.broadcast("[INFO] Summary: " + ticket.getSummary());
+            logStreamService.broadcast("[INFO] Description: " + ticket.getDescription());
+            logStreamService.broadcast("[INFO] Priority: " + (ticket.getPriority() != null ? ticket.getPriority() : "Not set"));
+            logStreamService.broadcast("[INFO] ============================");
 
-            auditLogService.logAuditEvent(ticket.getKey(), "jira_ticket_received", "success", Map.of(
+            auditLogService.logAuditEvent(ticket.getKey(), source.toLowerCase() + "_ticket_received", "success", Map.of(
                     "summary", ticket.getSummary(),
                     "priority", ticket.getPriority() != null ? ticket.getPriority() : "not_specified"
             ));
@@ -72,8 +75,8 @@ public class JiraWebhookService {
             AnalysisAgent.AnalysisResult analysisResult = analysisAgent.analyzeTicket(ticket, preferredModel);
             InvestigatorReport investigatorReport = analysisResult.getInvestigatorReport();
             PlannerReport plannerReport = analysisResult.getPlannerReport();
-            log.info("[INFO] Investigator Agent hypothesis: {}", investigatorReport.getHypothesis());
-            log.info("[INFO] Planner Agent strategy: {}", plannerReport.getRepairStrategy());
+            logStreamService.broadcast("[INFO] Investigator Agent hypothesis: " + investigatorReport.getHypothesis());
+            logStreamService.broadcast("[INFO] Planner Agent strategy: " + plannerReport.getRepairStrategy());
 
             // 4 & 5. Parallel Context Gathering (Memory, Error extraction, and Code context)
             java.util.concurrent.CompletableFuture<MemoryReport> memoryFuture = java.util.concurrent.CompletableFuture.supplyAsync(() ->
@@ -91,11 +94,11 @@ public class JiraWebhookService {
             java.util.concurrent.CompletableFuture.allOf(memoryFuture, errorInfoFuture, codeContextFuture).join();
 
             MemoryReport memoryReport = memoryFuture.join();
-            log.info("[INFO] Memory matched similar incident: {} (Confidence: {})", memoryReport.getId(), memoryReport.getConfidence());
+            logStreamService.broadcast("[INFO] Memory matched similar incident: " + memoryReport.getId() + " (Confidence: " + memoryReport.getConfidence() + ")");
 
             ExtractedErrorInfo errorInfo = errorInfoFuture.join();
             List<CodeContextService.CodeContext> codeContexts = codeContextFuture.join();
-            log.info("[INFO] Retrieved {} relevant file(s) from repository", codeContexts.size());
+            logStreamService.broadcast("[INFO] Retrieved " + codeContexts.size() + " relevant file(s) from repository");
             auditLogService.logAuditEvent(ticket.getKey(), "code_context_fetched", "success", Map.of(
                     "fileCount", codeContexts.size()
             ));
@@ -113,20 +116,20 @@ public class JiraWebhookService {
                     "outputLength", generatedCode.length()
             ));
 
-            log.info("[INFO] === AI Generated Code ===");
-            log.info(generatedCode);
-            log.info("[INFO] =========================");
+            logStreamService.broadcast("[INFO] === AI Generated Code ===");
+            logStreamService.broadcast(generatedCode);
+            logStreamService.broadcast("[INFO] =========================");
 
             // Parse changes
             List<FileChange> fileChanges = githubService.parseAICodeOutput(generatedCode);
-            log.info("[INFO] Parsed {} file change(s) from AI output", fileChanges.size());
+            logStreamService.broadcast("[INFO] Parsed " + fileChanges.size() + " file change(s) from AI output");
 
             // Safety Guards checks
             try {
                 safetyGuardService.guardFileChanges(fileChanges);
-                log.info("[INFO] Safety guards passed");
+                logStreamService.broadcast("[INFO] Safety guards passed");
             } catch (Exception e) {
-                log.error("[ERROR] Safety guard validation failed: {}", e.getMessage());
+                logStreamService.broadcast("[ERROR] Safety guard validation failed: " + e.getMessage());
                 auditLogService.logAuditEvent(ticket.getKey(), "safety_guard_blocked", "failed", Map.of(
                         "reason", e.getMessage()
                 ));
@@ -137,11 +140,13 @@ public class JiraWebhookService {
 
             // 8. Recovery Agent: Self-healing validation loops (with Reviewer Agent gated inside)
             // Inject demo open brace bracket mismatch only for ticket key "PROD-1234" to show self-healing live
-            boolean injectDemoError = ticket.getKey() != null && ticket.getKey().toUpperCase().contains("PROD-1234");
+            boolean injectDemoError = (ticket.getKey() != null && ticket.getKey().toUpperCase().contains("PROD-1234")) ||
+                                      (ticket.getSummary() != null && ticket.getSummary().toUpperCase().contains("PROD-1234")) ||
+                                      (ticket.getDescription() != null && ticket.getDescription().toUpperCase().contains("PROD-1234"));
             RecoveryAgent.RecoveryResult recoveryResult = recoveryAgent.runRecoveryLoop(fileChanges, preferredModel, injectDemoError);
 
             if (!recoveryResult.success) {
-                log.error("[ERROR] Self-healing recovery failed validation checks.");
+                logStreamService.broadcast("[ERROR] Self-healing recovery failed validation checks.");
                 result.put("status", "failed");
                 result.put("error", "Self-healing validation checks failed");
                 result.put("recoveryReport", recoveryResult.report);
@@ -155,18 +160,18 @@ public class JiraWebhookService {
             List<FileChange> finalFileChanges = recoveryResult.finalChanges;
 
             // 9. PR Agent: Push Commit & Create Pull Request
-            log.info("[INFO] === Creating Pull Request ===");
+            logStreamService.broadcast("[INFO] === Creating Pull Request ===");
             String branchName = "automata/" + ticket.getKey() + "-ai-fix";
             
             String branchSha = githubService.createBranch(branchName);
-            log.info("[INFO] Branch created with SHA: {}", branchSha);
+            logStreamService.broadcast("[INFO] Branch created with SHA: " + branchSha);
             auditLogService.logAuditEvent(ticket.getKey(), "github_branch_created", "success", Map.of(
                     "branchName", branchName,
                     "sha", branchSha
             ));
 
             String commitSha = githubService.commitChanges(branchName, finalFileChanges, "Automata AI fix for " + ticket.getKey());
-            log.info("[INFO] Changes committed successfully, commit SHA: {}", commitSha);
+            logStreamService.broadcast("[INFO] Changes committed successfully, commit SHA: " + commitSha);
             auditLogService.logAuditEvent(ticket.getKey(), "commit_created", "success", Map.of(
                     "commitSha", commitSha,
                     "fileCount", finalFileChanges.size()
@@ -175,7 +180,7 @@ public class JiraWebhookService {
             Map<String, Object> prResult = githubService.createPullRequest(branchName, ticket, finalFileChanges, null);
             String prUrl = (String) prResult.get("prUrl");
             int prNumber = (Integer) prResult.get("prNumber");
-            log.info("[INFO] Pull Request created (draft): {}", prUrl);
+            logStreamService.broadcast("[INFO] Pull Request created (draft): " + prUrl);
             auditLogService.logAuditEvent(ticket.getKey(), "pull_request_created", "success", Map.of(
                     "prUrl", prUrl,
                     "prNumber", prNumber
@@ -274,6 +279,14 @@ public class JiraWebhookService {
             ));
             result.put("status", "failed");
             result.put("error", e.getMessage());
+        }
+
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            String resultJson = mapper.writeValueAsString(result);
+            logStreamService.broadcast("[RESULT_JSON] " + resultJson);
+        } catch (Exception jsonEx) {
+            log.error("Failed to broadcast result JSON: {}", jsonEx.getMessage());
         }
 
         return result;

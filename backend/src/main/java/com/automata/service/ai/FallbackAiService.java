@@ -1,5 +1,6 @@
 package com.automata.service.ai;
 
+import com.automata.service.LogStreamService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,9 +31,12 @@ public class FallbackAiService {
     @Autowired
     private GroqAiService groqAiService;
 
+    @Autowired
+    private LogStreamService logStreamService;
+
     public String generateCode(String prompt, String preferredModel) {
         if (useMockAi) {
-            log.info("[WARNING] Using MOCK AI mode (development only)");
+            logStreamService.broadcast("[WARNING] Using MOCK AI mode (development only)");
             return mockAiService.generateCode(prompt);
         }
 
@@ -66,8 +70,8 @@ public class FallbackAiService {
                 return attempt.action.run();
             } catch (Exception e) {
                 lastError = e;
-                log.warn("[WARNING] Model {} failed or was exhausted: {}", attempt.name, e.getMessage());
-                log.info("[INFO] Attempting next fallback model...");
+                logStreamService.broadcast("[WARNING] Model " + attempt.name + " failed or was exhausted: " + e.getMessage());
+                logStreamService.broadcast("[INFO] Attempting next fallback model...");
             }
         }
 

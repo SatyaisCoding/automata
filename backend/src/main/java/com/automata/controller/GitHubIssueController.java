@@ -99,7 +99,7 @@ public class GitHubIssueController {
             // Determine preferred model
             String preferredModel = modelParam;
 
-            Map<String, Object> result = jiraWebhookService.processWebhook(ticket, preferredModel);
+            Map<String, Object> result = jiraWebhookService.processWebhook(ticket, preferredModel, "GitHub");
 
             if ("failed".equals(result.get("status"))) {
                 return ResponseEntity.internalServerError().body(result);

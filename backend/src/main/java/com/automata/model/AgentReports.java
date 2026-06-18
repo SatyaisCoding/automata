@@ -71,6 +71,12 @@ public class AgentReports {
         private String example;
         private String strategy;
         private List<AttemptItem> attempts;
+        /** "brace_check" | "compiler" | "compiler+tests" */
+        private String validationMode;
+        /** Raw compiler output (truncated to 2000 chars) for display in the dashboard */
+        private String compilerOutput;
+        /** Total healing attempts consumed */
+        private int totalAttemptsUsed;
     }
 
     @Data

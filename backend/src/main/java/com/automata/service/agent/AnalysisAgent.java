@@ -6,6 +6,7 @@ import com.automata.model.AgentReports.EvidenceItem;
 import com.automata.model.AgentReports.InvestigatorReport;
 import com.automata.model.AgentReports.PlannerReport;
 import com.automata.model.JiraTicket;
+import com.automata.service.LogStreamService;
 import com.automata.service.ai.FallbackAiService;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -28,6 +29,9 @@ public class AnalysisAgent {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private LogStreamService logStreamService;
+
     @Data
     @Builder
     @NoArgsConstructor
@@ -38,7 +42,7 @@ public class AnalysisAgent {
     }
 
     public AnalysisResult analyzeTicket(JiraTicket ticket, String preferredModel) {
-        log.info("[INFO] Analysis Agent formulating hypothesis and execution strategy in a single call...");
+        logStreamService.broadcast("[INFO] Analysis Agent formulating hypothesis and execution strategy in a single call...");
 
         String prompt = "You are the Analysis Agent for Automata. Analyze this incident ticket:\n" +
                 "Key: " + ticket.getKey() + "\n" +

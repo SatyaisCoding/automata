@@ -169,6 +169,19 @@ public class LocalMemoryService {
         }
     }
 
+    public String getIncidentsRaw() {
+        try {
+            File file = new File(memoryFilePath);
+            if (!file.exists() || file.length() == 0) {
+                return "[]";
+            }
+            return new String(Files.readAllBytes(Paths.get(memoryFilePath)));
+        } catch (Exception e) {
+            log.error("Failed to read all incidents from local memory database: {}", e.getMessage());
+            return "[]";
+        }
+    }
+
     private MemoryReport mapToMemoryReport(JsonNode node) {
         return MemoryReport.builder()
                 .id(node.path("id").asText())

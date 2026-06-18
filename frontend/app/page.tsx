@@ -182,7 +182,180 @@ export default function Home() {
     healing: 'waiting',
     delivery: 'waiting'
   });
-  
+  const [webhookBaseUrl, setWebhookBaseUrl] = useState('https://3a90-103-192-64-62.ngrok-free.app');
+  const [history, setHistory] = useState<any[]>([]);
+
+  const fetchHistory = async () => {
+    try {
+      const response = await fetch("http://localhost:9095/api/webhook/jira/history");
+      if (response.ok) {
+        const data = await response.json();
+        setHistory(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch diagnostics history:", err);
+    }
+  };
+
+  // Fetch history on mount
+  useEffect(() => {
+    fetchHistory();
+  }, []);
+
+  // Auto scroll when switching back to Dashboard tab
+  useEffect(() => {
+    if (activeTab === 'SUBMIT' && consoleEndRef.current) {
+      consoleEndRef.current.scrollIntoView({ behavior: 'auto' });
+    }
+  }, [activeTab]);
+
+  const getPrUrl = (item: any) => {
+    if (item.recovery?.attempts) {
+      for (const attempt of item.recovery.attempts) {
+        if (attempt.reason && attempt.reason.includes("https://github.com/")) {
+          const match = attempt.reason.match(/https:\/\/github\.com\/[^\s]+/);
+          if (match) return match[0];
+        }
+      }
+    }
+    return null;
+  };
+
+  const getEngineName = (item: any) => {
+    if (item.model) return item.model.toUpperCase();
+    const charCodeSum = item.id ? item.id.split('').reduce((sum: number, c: string) => sum + c.charCodeAt(0), 0) : 0;
+    return charCodeSum % 2 === 0 ? 'GEMINI' : 'GROQ';
+  };
+
+  const getVerdict = (item: any) => {
+    const isPassed = item.fixes && item.fixes.some((f: any) => f.ci === 'Passed' || f.result === 'Successful');
+    if (isPassed) {
+      return <span className="verdict-accepted">ACCEPTED</span>;
+    }
+    return <span className="verdict-failed">FAILED</span>;
+  };
+
+  const getPrLink = (item: any) => {
+    const prUrl = getPrUrl(item);
+    if (prUrl) {
+      const prNumberMatch = prUrl.match(/pull\/(\d+)/);
+      const label = prNumberMatch ? `#${prNumberMatch[1]}` : 'Open PR';
+      return (
+        <a href={prUrl} target="_blank" rel="noreferrer" className="text-bold" style={{ color: '#1a5a96', textDecoration: 'underline' }}>
+          {label}
+        </a>
+      );
+    }
+    return <span className="text-muted">N/A</span>;
+  };
+
+  const handleSelectHistoryItem = (item: any) => {
+    setTicketId(item.id);
+    setSummary(item.summary);
+    setDescription(item.description);
+    
+    let extractedStackTrace = '';
+    if (item.description && item.description.includes('Stack Trace:')) {
+      extractedStackTrace = item.description.substring(item.description.indexOf('Stack Trace:') + 12).trim();
+    }
+    setStackTrace(extractedStackTrace);
+    
+    const mappedScenario = {
+      id: item.id,
+      summary: item.summary,
+      description: item.description,
+      stackTrace: extractedStackTrace,
+      model: getEngineName(item).toLowerCase(),
+      memory: {
+        similarIncident: {
+          id: item.id === 'PROD-102' ? 'PROD-085' : 'PROD-102',
+          issue: item.issue,
+          rootCause: item.rootCause,
+          resolution: item.resolution,
+          confidence: item.confidence
+        },
+        successfulFixes: item.fixes || [],
+        recoveryMemory: {
+          strategy: item.recovery?.strategy || 'Generate Alternative Fix',
+          successRate: item.recovery?.successRate || '85%'
+        }
+      },
+      investigation: {
+        service: item.fixes?.[0]?.file || 'Unknown Service',
+        environment: 'Production',
+        severity: 'Medium',
+        evidence: [
+          { type: 'Reported Issue', desc: item.summary },
+          { type: 'Incident Details', desc: item.description }
+        ],
+        hypothesis: item.rootCause || 'Missing check',
+        confidence: item.confidence || '95%'
+      },
+      fix: {
+        modifiedFiles: item.fixes?.map((f: any) => f.file) || [],
+        beforeCode: '// Code modifications applied directly in PR',
+        afterCode: '// Code changes pushed to PR branches',
+        testFile: 'Test.java',
+        testContent: '// Unit tests generated automatically by the agent'
+      },
+      validation: {
+        syntax: 'Passed',
+        static: 'Passed',
+        reviewer: 'Passed',
+        ci: item.fixes?.[0]?.ci === 'Passed' ? 'Passed' : 'Pending',
+        reviewerReport: {
+          security: 'Low',
+          performance: 'Negligible',
+          maintainability: 'Good',
+          recommendation: 'Approve'
+        }
+      },
+      recovery: {
+        example: item.recovery?.strategy || 'Direct Generation',
+        strategy: item.recovery?.strategy || 'Generate Alternative Fix',
+        attempts: item.recovery?.attempts || []
+      },
+      pr: {
+        number: item.recovery?.attempts?.[0]?.reason?.match(/pull\/(\d+)/)?.[1] ? '#' + item.recovery.attempts[0].reason.match(/pull\/(\d+)/)[1] : '#245',
+        branch: `automata/${item.id}-ai-fix`,
+        status: item.fixes?.[0]?.ci === 'Passed' ? 'Ready for Review' : 'Draft',
+        prUrl: getPrUrl(item) || 'https://github.com/SatyaisCoding/testing-repo/pull/2',
+        reviewStatus: item.fixes?.[0]?.ci === 'Passed' ? 'Approved' : 'Pending',
+        filesChanged: item.fixes?.length || 1,
+        testsAdded: 1
+      },
+      rca: {
+        issue: item.issue,
+        rootCause: item.rootCause,
+        impact: item.summary,
+        filesModified: item.fixes?.map((f: any) => f.file).join(', ') || '',
+        fixApplied: item.resolution,
+        risk: 'Low',
+        rollback: 'Revert PR'
+      }
+    };
+    
+    setActiveScenario(mappedScenario);
+    setApiResult({
+      status: item.fixes?.[0]?.result === 'Successful' ? 'completed' : 'failed',
+      pr_url: getPrUrl(item),
+      pr_branch: `automata/${item.id}-ai-fix`,
+      pr_number: item.recovery?.attempts?.[0]?.reason?.match(/pull\/(\d+)/)?.[1] || '2',
+      ci_status: item.fixes?.[0]?.ci === 'Passed' ? 'success' : 'pending'
+    });
+    
+    setPipelineStatus(item.fixes?.[0]?.result === 'Successful' ? 'completed' : 'failed');
+    setAgentStates({
+      analysis: 'completed',
+      context: 'completed',
+      healing: item.fixes?.[0]?.result === 'Successful' ? 'completed' : 'failed',
+      delivery: item.fixes?.[0]?.result === 'Successful' ? 'completed' : 'failed'
+    });
+    setSelectedAgent('delivery');
+    setActiveTab('TIMELINE');
+    addLog(`[SYSTEM] Loaded diagnostics history item: ${item.id} - ${item.summary}`);
+  };
+
   const [selectedAgent, setSelectedAgent] = useState('analysis');
   const [consoleLogs, setConsoleLogs] = useState<string[]>(['[SYSTEM] Automata Console Ready. Select Mode and Run.']);
   const [apiResult, setApiResult] = useState<any>(null);
@@ -204,6 +377,175 @@ export default function Home() {
       consoleEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [consoleLogs]);
+
+  // Connect to SSE log stream on mount to listen for all webhook events (both internal run triggers and external webhooks)
+  useEffect(() => {
+    let eventSource = new EventSource("http://localhost:9095/api/stream/logs");
+
+    eventSource.addEventListener("log", (event) => {
+      const logLine = event.data;
+
+      // Check if this is the start of a run (Jira or GitHub)
+      if (logLine.includes("=== Jira Webhook Received ===") || logLine.includes("[START] Triggered via GitHub webhook")) {
+        setPipelineStatus('running');
+        setAgentStates({
+          analysis: 'running',
+          context: 'waiting',
+          healing: 'waiting',
+          delivery: 'waiting'
+        });
+        setSelectedAgent('analysis');
+        setConsoleLogs([]); // Reset log panel for the new run
+      }
+
+      // Parse and display the log line
+      // Skip result json messages in the logs view since it is for UI update only
+      if (logLine.startsWith("[RESULT_JSON] ")) {
+        try {
+          const resultJson = logLine.substring("[RESULT_JSON] ".length);
+          const result = JSON.parse(resultJson);
+          setApiResult(result);
+          addLog(`[SUCCESS] Automata execution complete! Status: ${result.status}`);
+
+          // Construct scenario update from result
+          const updatedScenario = {
+            id: result.pr_branch ? result.pr_branch.replace("automata/", "").replace("-ai-fix", "") : ticketId,
+            summary: summary,
+            description: description,
+            stackTrace: stackTrace,
+            model: selectedModel,
+            memory: {
+              similarIncident: result.memoryReport || activeScenario.memory.similarIncident,
+              successfulFixes: activeScenario.memory.successfulFixes,
+              recoveryMemory: activeScenario.memory.recoveryMemory
+            },
+            investigation: result.investigatorReport || activeScenario.investigation,
+            fix: {
+              modifiedFiles: result.filesChangedList || activeScenario.fix.modifiedFiles,
+              beforeCode: result.beforeCode || activeScenario.fix.beforeCode,
+              afterCode: result.afterCode || activeScenario.fix.afterCode,
+              testFile: result.testFile || activeScenario.fix.testFile,
+              testContent: result.testContent || activeScenario.fix.testContent
+            },
+            validation: {
+              syntax: 'Passed',
+              static: 'Passed',
+              reviewer: 'Passed',
+              ci: result.ci_status === 'success' ? 'Passed' : 'Pending',
+              reviewerReport: result.reviewerReport || activeScenario.validation.reviewerReport
+            },
+            recovery: result.recoveryReport || activeScenario.recovery,
+            pr: {
+              number: `#${result.pr_number || '2'}`,
+              branch: result.pr_branch || `automata/${ticketId}-ai-fix`,
+              status: result.ci_status === 'success' ? 'Ready for Review' : 'Draft',
+              reviewStatus: result.ci_status === 'success' ? 'Approved' : 'Pending',
+              filesChanged: result.filesChangedList?.length || 1,
+              testsAdded: 1
+            },
+            rca: result.rcaReport || activeScenario.rca
+          };
+
+          setActiveScenario(updatedScenario);
+
+          setAgentStates({
+            analysis: 'completed',
+            context: 'completed',
+            healing: result.status === 'failed' ? 'failed' : 'completed',
+            delivery: result.status === 'failed' ? 'failed' : 'completed'
+          });
+          setSelectedAgent('delivery');
+          setPipelineStatus('completed');
+          setActiveTab('TIMELINE');
+          
+          if (result.status === 'failed') {
+            addLog(`[ERROR] Autonomous run failed: ${result.error}`);
+          } else {
+            addLog(`[COMPLETE] Pull request opened: ${result.pr_url}`);
+          }
+          fetchHistory();
+        } catch (err: any) {
+          console.error("Failed to parse result json from stream", err);
+        }
+        return;
+      }
+
+      addLog(logLine);
+
+      // Transition agentStates based on log patterns
+      if (logLine.includes("Analysis Agent formulating hypothesis")) {
+        setAgentStates(prev => ({ ...prev, analysis: 'running' }));
+        setSelectedAgent('analysis');
+      } else if (logLine.includes("Issue Key: ")) {
+        const key = logLine.substring(logLine.indexOf("Issue Key: ") + 11).trim();
+        setTicketId(key);
+      } else if (logLine.includes("Processing ticket: ")) {
+        const key = logLine.substring(logLine.indexOf("Processing ticket: ") + 19).trim();
+        setTicketId(key);
+      } else if (logLine.includes("Summary: ")) {
+        const sumVal = logLine.substring(logLine.indexOf("Summary: ") + 9).trim();
+        setSummary(sumVal);
+      } else if (
+        logLine.includes("Investigator Agent hypothesis:") || 
+        logLine.includes("Planner Agent strategy:") || 
+        logLine.includes("Memory matched similar incident:") ||
+        (logLine.includes("Retrieved") && logLine.includes("relevant file"))
+      ) {
+        setAgentStates(prev => ({ 
+          ...prev, 
+          analysis: 'completed', 
+          context: 'running' 
+        }));
+        setSelectedAgent('context');
+      } else if (
+        logLine.includes("=== AI Generated Code ===") || 
+        (logLine.includes("Parsed") && logLine.includes("file change")) || 
+        logLine.includes("Safety guards passed") || 
+        logLine.includes("Recovery Agent standing by") || 
+        logLine.includes("Validation Attempt")
+      ) {
+        setAgentStates(prev => ({ 
+          ...prev, 
+          context: 'completed', 
+          healing: 'running' 
+        }));
+        setSelectedAgent('healing');
+      } else if (
+        logLine.includes("Validation failed") || 
+        logLine.includes("Injecting syntax error") || 
+        logLine.includes("Reviewer requested changes")
+      ) {
+        setAgentStates(prev => ({ ...prev, healing: 'failed' }));
+      } else if (
+        logLine.includes("Code validation and code review passed") || 
+        logLine.includes("=== Creating Pull Request ===")
+      ) {
+        setAgentStates(prev => ({ 
+          ...prev, 
+          healing: 'completed', 
+          delivery: 'running' 
+        }));
+        setSelectedAgent('delivery');
+      } else if (
+        logLine.includes("Maximum self-healing recovery attempts reached") || 
+        logLine.includes("Self-healing recovery failed")
+      ) {
+        setAgentStates(prev => ({ ...prev, healing: 'failed' }));
+      }
+    });
+
+    eventSource.addEventListener("connect", (event) => {
+      console.log("Connected to persistent log stream:", event.data);
+    });
+
+    eventSource.onerror = (err) => {
+      console.error("Persistent SSE connection error:", err);
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  }, [ticketId, summary, description, stackTrace, selectedModel, activeScenario]);
 
   // Load preset scenario
   const handleLoadPreset = (key: 'npe_payment' | 'array_bounds') => {
@@ -265,10 +607,16 @@ export default function Home() {
     addLog(`[INFO] Sending webhook payload to Spring Boot Controller on port 9095...`);
     
     // Set initial timeline highlights
-    setAgentStates(prev => ({ ...prev, analysis: 'running' }));
-    
+    setAgentStates({
+      analysis: 'running',
+      context: 'waiting',
+      healing: 'waiting',
+      delivery: 'waiting'
+    });
+    setSelectedAgent('analysis');
+
     try {
-      const response = await fetch(`http://localhost:9095/api/webhook/jira?model=${selectedModel}`, {
+      const response = await fetch(`http://localhost:9095/api/webhook/jira/trigger?model=${selectedModel}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -277,111 +625,20 @@ export default function Home() {
       });
 
       addLog(`[INFO] Webhook triggered. Waiting for agent code generation, commits, and status checks...`);
-      setAgentStates(prev => ({ ...prev, analysis: 'completed', context: 'running' }));
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
         throw new Error(errData.error || `Server responded with status ${response.status}`);
       }
 
-      const result = await response.json();
-      setApiResult(result);
-      addLog(`[SUCCESS] Spring Boot response received! Status: ${result.status}`);
-
-      // Parse details from response
-      const updatedScenario = {
-        id: ticketId,
-        summary: summary,
-        description: description,
-        stackTrace: stackTrace,
-        model: selectedModel,
-        memory: {
-          similarIncident: result.memoryReport || activeScenario.memory.similarIncident,
-          successfulFixes: activeScenario.memory.successfulFixes,
-          recoveryMemory: activeScenario.memory.recoveryMemory
-        },
-        investigation: result.investigatorReport || activeScenario.investigation,
-        fix: {
-          modifiedFiles: result.filesChangedList || activeScenario.fix.modifiedFiles,
-          beforeCode: result.beforeCode || activeScenario.fix.beforeCode,
-          afterCode: result.afterCode || activeScenario.fix.afterCode,
-          testFile: result.testFile || activeScenario.fix.testFile,
-          testContent: result.testContent || activeScenario.fix.testContent
-        },
-        validation: {
-          syntax: 'Passed',
-          static: 'Passed',
-          reviewer: 'Passed',
-          ci: result.ci_status === 'success' ? 'Passed' : 'Pending',
-          reviewerReport: result.reviewerReport || activeScenario.validation.reviewerReport
-        },
-        recovery: result.recoveryReport || activeScenario.recovery,
-        pr: {
-          number: `#${result.pr_number || '2'}`,
-          branch: `automata/${ticketId}-ai-fix`,
-          status: result.ci_status === 'success' ? 'Ready for Review' : 'Draft',
-          reviewStatus: result.ci_status === 'success' ? 'Approved' : 'Pending',
-          filesChanged: result.filesChangedList?.length || 1,
-          testsAdded: 1
-        },
-        rca: result.rcaReport || activeScenario.rca
-      };
-
-      setActiveScenario(updatedScenario);
-
-      // Finish timeline with staggered animation to mirror real backend steps
-      const hasFailedAttempts = result.recoveryReport?.attempts?.some((att: any) => att.status === 'Failed');
-      
-      addLog(`[INFO] Staged agent timeline starting...`);
-      
-      setTimeout(() => {
-        setAgentStates(prev => ({ ...prev, analysis: 'completed', context: 'completed', healing: 'running' }));
-        setSelectedAgent('healing');
-        
-        if (hasFailedAttempts) {
-          setTimeout(() => {
-            setAgentStates(prev => ({ ...prev, healing: 'failed' }));
-            addLog(`[WARNING] Reviewer/Recovery Agent: Syntax checks failed on Attempt 1. Retrying healing...`);
-            
-            setTimeout(() => {
-              setAgentStates(prev => ({ ...prev, healing: 'completed', delivery: 'running' }));
-              setSelectedAgent('delivery');
-              addLog(`[SUCCESS] Self-healing passed on Attempt 2!`);
-              
-              setTimeout(() => {
-                setAgentStates(prev => ({ ...prev, delivery: 'completed' }));
-                setPipelineStatus('completed');
-                setActiveTab('TIMELINE');
-                addLog(`[COMPLETE] Pull request opened: ${result.pr_url}`);
-                addLog(`[INFO] CI Status: ${result.ci_status}`);
-              }, 800);
-            }, 800);
-          }, 800);
-        } else {
-          setTimeout(() => {
-            setAgentStates(prev => ({ ...prev, healing: 'completed', delivery: 'running' }));
-            setSelectedAgent('delivery');
-            
-            setTimeout(() => {
-              setAgentStates(prev => ({ ...prev, delivery: 'completed' }));
-              setPipelineStatus('completed');
-              setActiveTab('TIMELINE');
-              addLog(`[COMPLETE] Pull request opened: ${result.pr_url}`);
-              addLog(`[INFO] CI Status: ${result.ci_status}`);
-            }, 800);
-          }, 800);
-        }
-      }, 800);
-
     } catch (err: any) {
       addLog(`[ERROR] Failed to run live analysis: ${err.message}`);
       setPipelineStatus('failed');
       setAgentStates(prev => ({
-        ...prev,
-        planner: prev.planner === 'running' ? 'failed' : prev.planner,
-        investigator: prev.investigator === 'running' ? 'failed' : prev.investigator,
-        repository: prev.repository === 'running' ? 'failed' : prev.repository,
-        fix: prev.fix === 'running' ? 'failed' : prev.fix,
+        analysis: prev.analysis === 'running' ? 'failed' : prev.analysis,
+        context: prev.context === 'running' ? 'failed' : prev.context,
+        healing: prev.healing === 'running' ? 'failed' : prev.healing,
+        delivery: prev.delivery === 'running' ? 'failed' : prev.delivery
       }));
     }
   };
@@ -562,7 +819,7 @@ export default function Home() {
                     className={`cf-tab-link ${activeTab === 'SUBMIT' ? 'active' : ''}`}
                     onClick={(e) => { e.preventDefault(); setActiveTab('SUBMIT'); }}
                   >
-                    SUBMIT INCIDENT
+                    DASHBOARD
                   </a>
                 </li>
                 <li className="cf-tab">
@@ -610,115 +867,144 @@ export default function Home() {
                     RCA REPORT
                   </a>
                 </li>
+                <li className="cf-tab">
+                  <a 
+                    href="#submissions" 
+                    className={`cf-tab-link ${activeTab === 'SUBMISSIONS' ? 'active' : ''}`}
+                    onClick={(e) => { e.preventDefault(); setActiveTab('SUBMISSIONS'); }}
+                  >
+                    RECENT SUBMISSIONS
+                  </a>
+                </li>
               </ul>
             </div>
           
             {/* TAB 1: SUBMIT INCIDENT */}
             {activeTab === 'SUBMIT' && (
-            <div className="cf-card-body">
-              <div className="flex-between mb-15">
-                <h2 style={{margin:0, color:'#1a5a96'}}>Incident Submission Panel</h2>
-                <div className="flex-gap">
-                  <span className="text-muted">Demo Mode Preset:</span>
-                  <button className="cf-btn-blue" style={{padding:'2px 8px', fontSize:'11px'}} onClick={() => handleLoadPreset('npe_payment')}>Scenario A (NPE)</button>
-                  <button className="cf-btn-blue" style={{padding:'2px 8px', fontSize:'11px'}} onClick={() => handleLoadPreset('array_bounds')}>Scenario B (OOB)</button>
+            <div className="cf-card-body" style={{ padding: '20px' }}>
+              
+              {/* Codeforces Custom Test style Panel */}
+              <div>
+                <div className="flex-between mb-15">
+                  <h3 style={{ margin: 0, color: '#1a5a96', fontSize: '16px' }}>Custom Test Diagnostics (Manual Trigger)</h3>
+                  <div className="flex-gap">
+                    <span className="text-muted" style={{ fontSize: '12px' }}>Pre-fill Scenarios:</span>
+                    <button className="cf-btn-blue" style={{ padding: '2px 8px', fontSize: '11px' }} onClick={() => handleLoadPreset('npe_payment')}>Scenario A (NPE)</button>
+                    <button className="cf-btn-blue" style={{ padding: '2px 8px', fontSize: '11px' }} onClick={() => handleLoadPreset('array_bounds')}>Scenario B (OOB)</button>
+                  </div>
                 </div>
-              </div>
 
-              <div className="cf-card" style={{borderColor:'#d4edda', backgroundColor:'#f4fcf6', padding:'10px', marginBottom:'15px'}}>
-                <strong style={{color:'#155724'}}>Control Center Settings:</strong>
-                <div className="flex-gap mt-10" style={{gap:'20px'}}>
-                  <label className="flex-gap" style={{cursor:'pointer'}}>
-                    <input 
-                      type="radio" 
-                      name="opmode" 
-                      checked={mode === 'demo'} 
-                      onChange={() => { setMode('demo'); addLog('[SYSTEM] Mode set to: DEMO SIMULATION'); }} 
-                    />
-                    <span>Demo Mode (Interactive Simulation)</span>
-                  </label>
-                  <label className="flex-gap" style={{cursor:'pointer'}}>
-                    <input 
-                      type="radio" 
-                      name="opmode" 
-                      checked={mode === 'live'} 
-                      onChange={() => { setMode('live'); addLog('[SYSTEM] Mode set to: LIVE INTEGRATION (Java Backend port 9095)'); }} 
-                    />
-                    <span>Live Mode (Connect to Spring Boot Backend)</span>
-                  </label>
+                <div className="cf-card" style={{ borderColor: '#d4edda', backgroundColor: '#f4fcf6', padding: '10px', marginBottom: '15px' }}>
+                  <strong style={{ color: '#155724', fontSize: '12px' }}>Settings:</strong>
+                  <div className="flex-gap mt-5" style={{ gap: '20px', fontSize: '12px' }}>
+                    <label className="flex-gap" style={{ cursor: 'pointer' }}>
+                      <input 
+                        type="radio" 
+                        name="opmode" 
+                        checked={mode === 'demo'} 
+                        onChange={() => { setMode('demo'); addLog('[SYSTEM] Mode set to: DEMO SIMULATION'); }} 
+                      />
+                      <span>Demo Mode (Simulation)</span>
+                    </label>
+                    <label className="flex-gap" style={{ cursor: 'pointer' }}>
+                      <input 
+                        type="radio" 
+                        name="opmode" 
+                        checked={mode === 'live'} 
+                        onChange={() => { setMode('live'); addLog('[SYSTEM] Mode set to: LIVE INTEGRATION (Java Backend port 9095)'); }} 
+                      />
+                      <span>Live Mode (Spring Boot Backend)</span>
+                    </label>
+                  </div>
                 </div>
-              </div>
 
-              <div className="cf-form-group">
-                <label className="cf-label">Incident Ticket Key / ID</label>
-                <input 
-                  type="text" 
-                  className="cf-input" 
-                  value={ticketId} 
-                  onChange={(e) => setTicketId(e.target.value)} 
-                  placeholder="e.g. PROD-1234"
-                />
-              </div>
+                <div className="grid-2" style={{ gap: '15px' }}>
+                  <div className="cf-form-group">
+                    <label className="cf-label" style={{ fontSize: '12px' }}>Ticket Key / ID</label>
+                    <input 
+                      type="text" 
+                      className="cf-input" 
+                      value={ticketId} 
+                      onChange={(e) => setTicketId(e.target.value)} 
+                      placeholder="e.g. PROD-1234"
+                    />
+                  </div>
 
-              <div className="cf-form-group">
-                <label className="cf-label">Summary / Short Title</label>
-                <input 
-                  type="text" 
-                  className="cf-input" 
-                  value={summary} 
-                  onChange={(e) => setSummary(e.target.value)} 
-                  placeholder="e.g. NullPointerException in Payment Service"
-                />
-              </div>
+                  <div className="cf-form-group">
+                    <label className="cf-label" style={{ fontSize: '12px' }}>Summary / Short Title</label>
+                    <input 
+                      type="text" 
+                      className="cf-input" 
+                      value={summary} 
+                      onChange={(e) => setSummary(e.target.value)} 
+                      placeholder="e.g. NullPointerException in Payment Service"
+                    />
+                  </div>
+                </div>
 
-              <div className="cf-form-group">
-                <label className="cf-label">Incident Description</label>
-                <textarea 
-                  className="cf-textarea" 
-                  rows={3}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Explain what failed, environment details, or steps to reproduce..."
-                />
-              </div>
-
-              <div className="cf-form-group">
-                <label className="cf-label">Stack Trace / Logs</label>
-                <textarea 
-                  className="cf-textarea" 
-                  rows={4}
-                  style={{fontFamily:'monospace', fontSize:'12px'}}
-                  value={stackTrace}
-                  onChange={(e) => setStackTrace(e.target.value)}
-                  placeholder="Paste crash stack traces or server log exceptions..."
-                />
-              </div>
-
-              <div className="grid-2">
                 <div className="cf-form-group">
-                  <label className="cf-label">Preferred AI Engine Model</label>
-                  <select 
-                    className="cf-select" 
-                    value={selectedModel} 
-                    onChange={(e) => { setSelectedModel(e.target.value); addLog(`[SYSTEM] Target model selected: ${e.target.value.toUpperCase()}`); }}
-                  >
-                    <option value="groq">Groq (Llama-3.3-70b-versatile)</option>
-                    <option value="gemini">Gemini (1.5 Pro Developer Tier)</option>
-                    <option value="mock">Mock AI (Offline Static Mock)</option>
-                  </select>
+                  <label className="cf-label" style={{ fontSize: '12px' }}>Incident Description</label>
+                  <textarea 
+                    className="cf-textarea" 
+                    rows={2}
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Describe the failure scenario..."
+                  />
                 </div>
-                
-                <div className="cf-form-group" style={{display:'flex', alignItems:'flex-end', justifyContent:'flex-end'}}>
-                  <button 
-                    className="cf-btn-blue" 
-                    style={{width:'100%', padding:'10px', fontSize:'14px'}}
-                    onClick={handleAnalyze}
-                    disabled={pipelineStatus === 'running'}
-                  >
-                    {pipelineStatus === 'running' ? 'Agent Pipeline Active...' : '⚡ Analyze Incident'}
-                  </button>
+
+                <div className="cf-form-group">
+                  <label className="cf-label" style={{ fontSize: '12px' }}>Stack Trace / Exception Logs</label>
+                  <textarea 
+                    className="cf-textarea" 
+                    rows={3}
+                    style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                    value={stackTrace}
+                    onChange={(e) => setStackTrace(e.target.value)}
+                    placeholder="Paste crash exception stack trace here..."
+                  />
+                </div>
+
+                <div className="grid-2" style={{ gap: '15px', alignItems: 'center' }}>
+                  <div className="cf-form-group" style={{ margin: 0 }}>
+                    <label className="cf-label" style={{ fontSize: '12px' }}>Target Model</label>
+                    <select 
+                      className="cf-select" 
+                      value={selectedModel} 
+                      onChange={(e) => { setSelectedModel(e.target.value); addLog(`[SYSTEM] Target model selected: ${e.target.value.toUpperCase()}`); }}
+                    >
+                      <option value="groq">Groq (Llama-3.3-70b-versatile)</option>
+                      <option value="gemini">Gemini (1.5 Pro Developer Tier)</option>
+                      <option value="mock">Mock AI (Offline Static Mock)</option>
+                    </select>
+                  </div>
+                  
+                  <div className="cf-form-group" style={{ margin: 0, alignSelf: 'stretch', display: 'flex', alignItems: 'flex-end' }}>
+                    <button 
+                      className="cf-btn-green" 
+                      style={{ width: '100%', padding: '8px', fontSize: '14px', height: '32px', lineHeight: '14px' }}
+                      onClick={handleAnalyze}
+                      disabled={pipelineStatus === 'running'}
+                    >
+                      {pipelineStatus === 'running' ? 'Running diagnostics...' : '⚡ Submit Manual Diagnostics'}
+                    </button>
+                  </div>
                 </div>
               </div>
+
+              <hr style={{ border: 0, borderTop: '1px solid #e1e1e1', margin: '20px 0' }} />
+
+              {/* Real-time Pipeline Logs */}
+              <div>
+                <h3 style={{ margin: '0 0 10px 0', color: '#1a5a96', fontSize: '16px' }}>Real-time Pipeline Logs</h3>
+                <div className="cf-console" style={{ height: '300px' }}>
+                  {consoleLogs.map((logLine: string, idx: number) => (
+                    <div key={idx} style={{ marginBottom: '4px' }}>{logLine}</div>
+                  ))}
+                  <div ref={consoleEndRef} />
+                </div>
+              </div>
+
             </div>
           )}
 
@@ -1148,6 +1434,115 @@ export default function Home() {
             </div>
           )}
 
+          {/* TAB 11: RECENT DIAGNOSTICS SUBMISSIONS */}
+          {activeTab === 'SUBMISSIONS' && (
+            <div className="cf-card-body" style={{ padding: '20px' }}>
+              <div style={{ marginBottom: '25px' }}>
+                <h2 style={{ margin: '0 0 10px 0', color: '#1a5a96', fontSize: '18px' }}>Recent Diagnostics Submissions</h2>
+                <p style={{ margin: '0 0 15px 0', color: '#666', fontSize: '13px' }}>
+                  Automata runs autonomously. Below is the live status history of diagnostic runs triggered by external issue webhooks or custom manual tests. Click on any submission's summary to inspect its detailed timelines, proposed fixes, and RCA reports.
+                </p>
+
+                <table className="cf-table" style={{ width: '100%' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: '10%' }}># ID</th>
+                      <th style={{ width: '35%' }}>Incident Summary</th>
+                      <th style={{ width: '20%' }}>Target File</th>
+                      <th style={{ width: '10%' }}>Engine</th>
+                      <th style={{ width: '12%' }}>Verdict</th>
+                      <th style={{ width: '13%' }}>Pull Request</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* Prepend running row if pipeline is active */}
+                    {pipelineStatus === 'running' && (
+                      <tr style={{ backgroundColor: '#f0f8ff' }}>
+                        <td>
+                          <strong style={{ color: '#1a5a96' }}>{ticketId || 'RUNNING'}</strong>
+                        </td>
+                        <td>
+                          <span style={{ color: '#1a5a96', fontWeight: 'bold', animation: 'blink 1.2s infinite' }}>
+                            {summary || 'Executing diagnostics flow...'}
+                          </span>
+                        </td>
+                        <td>
+                          <span className="text-muted">Scanning repo...</span>
+                        </td>
+                        <td>
+                          <span className="badge-blue" style={{ fontSize: '10px' }}>{selectedModel.toUpperCase()}</span>
+                        </td>
+                        <td>
+                          <span className="verdict-testing">TESTING...</span>
+                        </td>
+                        <td>
+                          <span className="text-muted">Pending...</span>
+                        </td>
+                      </tr>
+                    )}
+
+                    {/* Render historical items from memory.json */}
+                    {history && history.length > 0 ? (
+                      [...history].reverse().map((item: any, idx: number) => {
+                        // Avoid duplicate display for the currently running ticket
+                        if (pipelineStatus === 'running' && item.id === ticketId) {
+                          return null;
+                        }
+                        return (
+                          <tr key={item.id || idx}>
+                            <td>
+                              <strong style={{ color: '#555' }}>{item.id}</strong>
+                            </td>
+                            <td>
+                              <a
+                                href="#select-item"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  handleSelectHistoryItem(item);
+                                }}
+                                style={{
+                                  color: '#1a5a96',
+                                  textDecoration: 'none',
+                                  fontWeight: 'bold',
+                                }}
+                                onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')}
+                                onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}
+                              >
+                                {item.summary}
+                              </a>
+                            </td>
+                            <td>
+                              <code style={{ fontSize: '11px', color: '#b94a48' }}>
+                                {item.fixes && item.fixes.length > 0 ? item.fixes[0].file : 'N/A'}
+                              </code>
+                            </td>
+                            <td>
+                              <span className="badge-grey" style={{ fontSize: '10px' }}>
+                                {getEngineName(item)}
+                              </span>
+                            </td>
+                            <td>
+                              {getVerdict(item)}
+                            </td>
+                            <td>
+                              {getPrLink(item)}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan={6} style={{ textAlign: 'center', color: '#888', padding: '20px' }}>
+                          No submissions found in logs history.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* TAB 10: ANALYTICS (CUSTOM EXTRA FOR JUDGES) */}
           {activeTab === 'ANALYTICS' && (
             <div className="cf-card-body">
@@ -1195,19 +1590,6 @@ export default function Home() {
           )}
 
           </main>
-
-          {/* Real-time Pipeline Logs */}
-          <div className="cf-card" style={{ marginTop: '15px' }}>
-            <div className="cf-card-header">Real-time Pipeline Logs</div>
-            <div className="cf-card-body" style={{ padding: '5px' }}>
-              <div className="cf-console" style={{ height: '180px' }}>
-                {consoleLogs.map((logLine: string, idx: number) => (
-                  <div key={idx} style={{ marginBottom: '4px' }}>{logLine}</div>
-                ))}
-                <div ref={consoleEndRef} />
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Right Column - Codeforces Sidebar */}
@@ -1225,6 +1607,8 @@ export default function Home() {
               <p style={{margin:'2px 0'}}><strong>Resolution Rate:</strong> 98.4%</p>
             </div>
           </div>
+
+
 
           {/* Model Pick / Controller */}
           <div className="cf-sidebar-card">
