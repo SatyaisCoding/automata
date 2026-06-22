@@ -1,4 +1,4 @@
-# 🤖 AUTOMATA — Autonomous Incident-to-PR Control Center
+#AUTOMATA — Autonomous Incident-to-PR Control Center
 
 > **"From ticket to pull request — fully autonomous."**
 
@@ -731,10 +731,10 @@ The project uses the following branches:
 
 ## 📄 License
 
-This project was built for a hackathon demonstration. See [LICENSE](LICENSE) for details.
+This project was built for a Skills demonstration. See [LICENSE](LICENSE) for details.
 
 ---
 
 <p align="center">
-  Built with ❤️ by the Automata team
+  Built with ❤️ by the Satya
 </p>
