@@ -1,4 +1,4 @@
-#AUTOMATA — Autonomous Incident-to-PR Control Center
+# AUTOMATA — Autonomous Incident-to-PR Control Center
 
 > **"From ticket to pull request — fully autonomous."**
 
